@@ -1,0 +1,15 @@
+{
+  "name": "better-budget-bot",
+  "version": "1.0.0",
+  "description": "A Telegram bot to track daily expenses",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
