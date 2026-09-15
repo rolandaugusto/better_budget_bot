@@ -3,9 +3,9 @@ const TelegramBot = require("node-telegram-bot-api");
 const db = require("./db");
 const { todayRange, weekRange, monthRange } = require("./dateRanges");
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token = process.env.BOT_TOKEN;
 if (!token) {
-  console.error("Missing TELEGRAM_BOT_TOKEN. Copy .env.example to .env and set it.");
+  console.error("Missing BOT_TOKEN. Copy .env.example to .env and set it.");
   process.exit(1);
 }
 
