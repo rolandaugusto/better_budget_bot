@@ -8,6 +8,12 @@ venv/
 # Node
 node_modules/
 
+# Database
+expenses.db
+expenses.db-journal
+expenses.db-wal
+expenses.db-shm
+
 # Env
 .env
 .env.local
