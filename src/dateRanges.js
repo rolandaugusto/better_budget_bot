@@ -21,4 +21,30 @@ function monthRange() {
   return { start: toISODate(first), end: toISODate(now) };
 }
 
-module.exports = { todayRange, weekRange, monthRange };
+function allTimeRange() {
+  return { start: "1970-01-01", end: toISODate(new Date()) };
+}
+
+function monthLabel(d) {
+  return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+// Month-to-date range for the month `monthsAgo` months back (0 = current
+// month). Past months are capped to today's day-of-month so the comparison
+// covers the same number of days as the current, still-in-progress month.
+function monthToDateRange(monthsAgo = 0) {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
+  const daysInTargetMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const day = monthsAgo === 0 ? now.getDate() : Math.min(now.getDate(), daysInTargetMonth);
+  const end = new Date(target.getFullYear(), target.getMonth(), day);
+  return { start: toISODate(target), end: toISODate(end), label: monthLabel(target), day };
+}
+
+module.exports = {
+  todayRange,
+  weekRange,
+  monthRange,
+  allTimeRange,
+  monthToDateRange,
+};

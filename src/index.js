@@ -1,7 +1,13 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const db = require("./db");
-const { todayRange, weekRange, monthRange } = require("./dateRanges");
+const {
+  todayRange,
+  weekRange,
+  monthRange,
+  allTimeRange,
+  monthToDateRange,
+} = require("./dateRanges");
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -31,6 +37,89 @@ function summaryMessage(title, chatId, start, end) {
     (r) => `  ${r.category}: ${formatAmount(r.total)} (${r.count})`
   );
   return `${title}\nTotal: ${formatAmount(total)}\n\nBy category:\n${lines.join("\n")}`;
+}
+
+function formatBar(fraction, width = 10) {
+  const filled =
+    fraction > 0
+      ? Math.max(1, Math.min(width, Math.round(fraction * width)))
+      : 0;
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+const STATS_PERIODS = {
+  today: { range: todayRange, label: "Today" },
+  week: { range: weekRange, label: "This week" },
+  month: { range: monthRange, label: "This month" },
+  all: { range: allTimeRange, label: "All time" },
+};
+
+function statsMessage(chatId, periodKey) {
+  const { range, label } = STATS_PERIODS[periodKey];
+  const { start, end } = range();
+  const byCategory = db.getSummaryByCategory(chatId, start, end);
+  if (byCategory.length === 0) {
+    return `${label}\nNo expenses recorded.`;
+  }
+  const total = byCategory.reduce((sum, r) => sum + r.total, 0);
+  const maxTotal = Math.max(...byCategory.map((r) => r.total));
+  const lines = byCategory.map((r) => {
+    const pct = total > 0 ? (r.total / total) * 100 : 0;
+    const bar = formatBar(maxTotal > 0 ? r.total / maxTotal : 0);
+    return `${r.category.padEnd(12).slice(0, 12)} ${bar} ${formatAmount(r.total)} (${pct.toFixed(0)}%)`;
+  });
+  return `${label} by category\nTotal: ${formatAmount(total)}\n\n\`\`\`\n${lines.join("\n")}\n\`\`\``;
+}
+
+function trendLine(label, previous, current) {
+  const diff = current - previous;
+  const arrow = diff > 0 ? "🔺" : diff < 0 ? "🔻" : "▪️";
+  let pctText;
+  if (previous === 0 && current > 0) {
+    pctText = "new";
+  } else if (previous === 0) {
+    pctText = "0%";
+  } else {
+    pctText = `${diff >= 0 ? "+" : ""}${((diff / previous) * 100).toFixed(0)}%`;
+  }
+  return `${arrow} ${label}: ${formatAmount(previous)} → ${formatAmount(current)} (${pctText})`;
+}
+
+function trendMessage(chatId) {
+  const current = monthToDateRange(0);
+  const previous = monthToDateRange(1);
+  const currentExpenses = db.getExpenses(chatId, current.start, current.end);
+  const previousExpenses = db.getExpenses(chatId, previous.start, previous.end);
+  if (currentExpenses.length === 0 && previousExpenses.length === 0) {
+    return "Not enough data yet to show a trend.";
+  }
+
+  const currentTotal = currentExpenses.reduce((s, e) => s + e.amount, 0);
+  const previousTotal = previousExpenses.reduce((s, e) => s + e.amount, 0);
+
+  const currentByCategory = db.getSummaryByCategory(chatId, current.start, current.end);
+  const previousByCategory = db.getSummaryByCategory(chatId, previous.start, previous.end);
+  const byCategory = new Map();
+  for (const r of previousByCategory) {
+    byCategory.set(r.category, { previous: r.total, current: 0 });
+  }
+  for (const r of currentByCategory) {
+    const entry = byCategory.get(r.category) || { previous: 0, current: 0 };
+    entry.current = r.total;
+    byCategory.set(r.category, entry);
+  }
+  const categoryLines = [...byCategory.entries()]
+    .map(([category, v]) => ({ category, ...v, diff: Math.abs(v.current - v.previous) }))
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 8)
+    .map((r) => trendLine(r.category, r.previous, r.current));
+
+  const header = `${previous.label} (days 1–${previous.day}) → ${current.label} (days 1–${current.day})`;
+  return (
+    `Spending trend\n${header}\n\n` +
+    `${trendLine("Total", previousTotal, currentTotal)}\n\n` +
+    `By category:\n${categoryLines.join("\n")}`
+  );
 }
 
 // amount category [description]
@@ -63,7 +152,7 @@ bot.onText(/^\/start$/, (msg) => {
       "  <amount> <category> [description]\n" +
       "e.g. 15.50 food lunch with friends\n\n" +
       "Or use /add <amount> <category> [description]\n\n" +
-      "Other commands: /today /week /month /list /delete <id> /help"
+      "Other commands: /today /week /month /stats /trend /list /delete <id> /help"
   );
 });
 
@@ -75,6 +164,8 @@ bot.onText(/^\/help$/, (msg) => {
       "/today — today's expenses\n" +
       "/week — this week's expenses\n" +
       "/month — this month's expenses\n" +
+      "/stats [today|week|month|all] — category breakdown with bar chart (default month)\n" +
+      "/trend — compare this month-to-date vs the same days last month\n" +
       "/list [n] — recent expenses (default 10)\n" +
       "/delete <id> — remove an expense by id\n\n" +
       "Tip: you can skip /add and just send: 15.50 food lunch"
@@ -106,6 +197,17 @@ bot.onText(/^\/week$/, (msg) => {
 bot.onText(/^\/month$/, (msg) => {
   const { start, end } = monthRange();
   bot.sendMessage(msg.chat.id, summaryMessage("This month", msg.chat.id, start, end));
+});
+
+bot.onText(/^\/stats(?:@\S+)?(?:\s+(today|week|month|all))?$/i, (msg, match) => {
+  const periodKey = (match[1] || "month").toLowerCase();
+  bot.sendMessage(msg.chat.id, statsMessage(msg.chat.id, periodKey), {
+    parse_mode: "Markdown",
+  });
+});
+
+bot.onText(/^\/trend$/, (msg) => {
+  bot.sendMessage(msg.chat.id, trendMessage(msg.chat.id));
 });
 
 bot.onText(/^\/list(?:\s+(\d+))?$/, (msg, match) => {
