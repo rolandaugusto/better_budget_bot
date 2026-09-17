@@ -8,7 +8,6 @@ const {
   allTimeRange,
   monthToDateRange,
 } = require("./dateRanges");
-const { groupCategories, groupCategoryTrend } = require("./categoryGrouping");
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -33,7 +32,7 @@ function summaryMessage(title, chatId, start, end) {
     return `${title}\nNo expenses recorded.`;
   }
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const byCategory = groupCategories(db.getSummaryByCategory(chatId, start, end));
+  const byCategory = db.getSummaryByCategory(chatId, start, end);
   const lines = byCategory.map(
     (r) => `  ${r.category}: ${formatAmount(r.total)} (${r.count})`
   );
@@ -58,7 +57,7 @@ const STATS_PERIODS = {
 function statsMessage(chatId, periodKey) {
   const { range, label } = STATS_PERIODS[periodKey];
   const { start, end } = range();
-  const byCategory = groupCategories(db.getSummaryByCategory(chatId, start, end));
+  const byCategory = db.getSummaryByCategory(chatId, start, end);
   if (byCategory.length === 0) {
     return `${label}\nNo expenses recorded.`;
   }
@@ -69,12 +68,7 @@ function statsMessage(chatId, periodKey) {
     const bar = formatBar(maxTotal > 0 ? r.total / maxTotal : 0);
     return `${r.category.padEnd(12).slice(0, 12)} ${bar} ${formatAmount(r.total)} (${pct.toFixed(0)}%)`;
   });
-  const grouped = byCategory.filter((r) => r.members.length > 1);
-  const note =
-    grouped.length > 0
-      ? `\n\nGrouped similar categories: ${grouped.map((r) => r.members.join("+")).join(", ")}`
-      : "";
-  return `${label} by category\nTotal: ${formatAmount(total)}\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`${note}`;
+  return `${label} by category\nTotal: ${formatAmount(total)}\n\n\`\`\`\n${lines.join("\n")}\n\`\`\``;
 }
 
 function trendLine(label, previous, current) {
@@ -105,15 +99,20 @@ function trendMessage(chatId) {
 
   const currentByCategory = db.getSummaryByCategory(chatId, current.start, current.end);
   const previousByCategory = db.getSummaryByCategory(chatId, previous.start, previous.end);
-  const categoryLines = groupCategoryTrend(currentByCategory, previousByCategory)
+  const byCategory = new Map();
+  for (const r of previousByCategory) {
+    byCategory.set(r.category, { previous: r.total, current: 0 });
+  }
+  for (const r of currentByCategory) {
+    const entry = byCategory.get(r.category) || { previous: 0, current: 0 };
+    entry.current = r.total;
+    byCategory.set(r.category, entry);
+  }
+  const categoryLines = [...byCategory.entries()]
+    .map(([category, v]) => ({ category, ...v, diff: Math.abs(v.current - v.previous) }))
+    .sort((a, b) => b.diff - a.diff)
     .slice(0, 8)
-    .map((r) =>
-      trendLine(
-        r.members.length > 1 ? r.members.join("+") : r.category,
-        r.previous,
-        r.current
-      )
-    );
+    .map((r) => trendLine(r.category, r.previous, r.current));
 
   const header = `${previous.label} (days 1–${previous.day}) → ${current.label} (days 1–${current.day})`;
   return (
