@@ -152,7 +152,7 @@ bot.onText(/^\/start$/, (msg) => {
       "  <amount> <category> [description]\n" +
       "e.g. 15.50 food lunch with friends\n\n" +
       "Or use /add <amount> <category> [description]\n\n" +
-      "Other commands: /today /week /month /stats /trend /list /delete <id> /help"
+      "Other commands: /today /week /month /stats /trend /list /edit <id> <category> /delete <id> /help"
   );
 });
 
@@ -167,6 +167,7 @@ bot.onText(/^\/help$/, (msg) => {
       "/stats [today|week|month|all] — category breakdown with bar chart (default month)\n" +
       "/trend — compare this month-to-date vs the same days last month\n" +
       "/list [n] — recent expenses (default 10)\n" +
+      "/edit <id> <category> — fix a mistyped category on an expense\n" +
       "/delete <id> — remove an expense by id\n\n" +
       "Tip: you can skip /add and just send: 15.50 food lunch"
   );
@@ -227,6 +228,18 @@ bot.onText(/^\/delete(?:@\S+)?\s+(\d+)$/, (msg, match) => {
   bot.sendMessage(
     msg.chat.id,
     deleted ? `Deleted expense #${id}.` : `No expense #${id} found.`
+  );
+});
+
+bot.onText(/^\/edit(?:@\S+)?\s+(\d+)\s+(\S+)$/i, (msg, match) => {
+  const id = parseInt(match[1], 10);
+  const category = match[2];
+  const updated = db.updateCategory(msg.chat.id, id, category);
+  bot.sendMessage(
+    msg.chat.id,
+    updated
+      ? `Updated #${id} category to ${category.toLowerCase()}.`
+      : `No expense #${id} found.`
   );
 });
 

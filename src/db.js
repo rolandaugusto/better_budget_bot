@@ -32,6 +32,14 @@ function deleteExpense(chatId, id) {
   return info.changes > 0;
 }
 
+function updateCategory(chatId, id, category) {
+  const stmt = db.prepare(
+    "UPDATE expenses SET category = ? WHERE id = ? AND chat_id = ?"
+  );
+  const info = stmt.run(category.toLowerCase(), id, chatId);
+  return info.changes > 0;
+}
+
 function getExpenses(chatId, start, end) {
   const stmt = db.prepare(`
     SELECT * FROM expenses
@@ -62,6 +70,7 @@ function getSummaryByCategory(chatId, start, end) {
 module.exports = {
   addExpense,
   deleteExpense,
+  updateCategory,
   getExpenses,
   getRecentExpenses,
   getSummaryByCategory,
