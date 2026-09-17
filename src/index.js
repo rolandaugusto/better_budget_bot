@@ -152,7 +152,7 @@ bot.onText(/^\/start$/, (msg) => {
       "  <amount> <category> [description]\n" +
       "e.g. 15.50 food lunch with friends\n\n" +
       "Or use /add <amount> <category> [description]\n\n" +
-      "Other commands: /today /week /month /stats /trend /list /edit <id> <category> /delete <id> /help"
+      "Other commands: /today /week /month /stats /trend /list /edit <id> <category> /delete <id> /backup /restore /help"
   );
 });
 
@@ -168,7 +168,9 @@ bot.onText(/^\/help$/, (msg) => {
       "/trend — compare this month-to-date vs the same days last month\n" +
       "/list [n] — recent expenses (default 10)\n" +
       "/edit <id> <category> — fix a mistyped category on an expense\n" +
-      "/delete <id> — remove an expense by id\n\n" +
+      "/delete <id> — remove an expense by id\n" +
+      "/backup — download all your expenses as a JSON file\n" +
+      "/restore — restore expenses from a /backup file (just send the file)\n\n" +
       "Tip: you can skip /add and just send: 15.50 food lunch"
   );
 });
@@ -240,6 +242,95 @@ bot.onText(/^\/edit(?:@\S+)?\s+(\d+)\s+(\S+)$/i, (msg, match) => {
     updated
       ? `Updated #${id} category to ${category.toLowerCase()}.`
       : `No expense #${id} found.`
+  );
+});
+
+bot.onText(/^\/backup$/, (msg) => {
+  const chatId = msg.chat.id;
+  const rows = db.getAllExpenses(chatId);
+  if (rows.length === 0) {
+    bot.sendMessage(chatId, "No expenses to back up yet.");
+    return;
+  }
+  const records = rows.map((r) => ({
+    amount: r.amount,
+    category: r.category,
+    description: r.description,
+    created_at: r.created_at,
+  }));
+  const buffer = Buffer.from(JSON.stringify(records, null, 2), "utf-8");
+  const filename = `expenses-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  bot.sendDocument(
+    chatId,
+    buffer,
+    {
+      caption: `Backup of ${records.length} expense${records.length === 1 ? "" : "s"}. Send this file back anytime to /restore it.`,
+    },
+    { filename, contentType: "application/json" }
+  );
+});
+
+bot.onText(/^\/restore$/, (msg) => {
+  bot.sendMessage(
+    msg.chat.id,
+    "Send me the .json backup file created by /backup and I'll restore any expenses that aren't already in your history."
+  );
+});
+
+function isValidBackupRecord(r) {
+  return (
+    r &&
+    typeof r.amount === "number" &&
+    Number.isFinite(r.amount) &&
+    r.amount > 0 &&
+    typeof r.category === "string" &&
+    r.category.trim() !== "" &&
+    typeof r.created_at === "string" &&
+    r.created_at.trim() !== ""
+  );
+}
+
+const MAX_RESTORE_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+bot.on("document", async (msg) => {
+  const chatId = msg.chat.id;
+  const doc = msg.document;
+  if (doc.file_size && doc.file_size > MAX_RESTORE_FILE_SIZE) {
+    bot.sendMessage(chatId, "That file is too large to restore (max 5MB).");
+    return;
+  }
+
+  let records;
+  try {
+    const fileLink = await bot.getFileLink(doc.file_id);
+    const response = await fetch(fileLink);
+    const parsed = JSON.parse(await response.text());
+    if (!Array.isArray(parsed)) throw new Error("Backup file must contain a JSON array");
+    records = parsed;
+  } catch (err) {
+    bot.sendMessage(
+      chatId,
+      "Couldn't read that file. Make sure it's a valid backup .json file created by /backup."
+    );
+    return;
+  }
+
+  let inserted = 0;
+  let skipped = 0;
+  for (const r of records) {
+    if (
+      !isValidBackupRecord(r) ||
+      db.expenseExists(chatId, r.amount, r.category, r.description || "", r.created_at)
+    ) {
+      skipped++;
+      continue;
+    }
+    db.addExpenseRaw(chatId, r.amount, r.category, r.description || "", r.created_at);
+    inserted++;
+  }
+  bot.sendMessage(
+    chatId,
+    `Restore complete: ${inserted} expense${inserted === 1 ? "" : "s"} added, ${skipped} skipped (already present or invalid).`
   );
 });
 

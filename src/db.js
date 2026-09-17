@@ -40,6 +40,30 @@ function updateCategory(chatId, id, category) {
   return info.changes > 0;
 }
 
+function addExpenseRaw(chatId, amount, category, description, createdAt) {
+  const stmt = db.prepare(
+    "INSERT INTO expenses (chat_id, amount, category, description, created_at) VALUES (?, ?, ?, ?, ?)"
+  );
+  const info = stmt.run(chatId, amount, category.toLowerCase(), description || "", createdAt);
+  return info.lastInsertRowid;
+}
+
+function expenseExists(chatId, amount, category, description, createdAt) {
+  const stmt = db.prepare(`
+    SELECT 1 FROM expenses
+    WHERE chat_id = ? AND amount = ? AND category = ? AND description = ? AND created_at = ?
+    LIMIT 1
+  `);
+  return !!stmt.get(chatId, amount, category.toLowerCase(), description || "", createdAt);
+}
+
+function getAllExpenses(chatId) {
+  const stmt = db.prepare(
+    "SELECT * FROM expenses WHERE chat_id = ? ORDER BY created_at ASC"
+  );
+  return stmt.all(chatId);
+}
+
 function getExpenses(chatId, start, end) {
   const stmt = db.prepare(`
     SELECT * FROM expenses
@@ -69,8 +93,11 @@ function getSummaryByCategory(chatId, start, end) {
 
 module.exports = {
   addExpense,
+  addExpenseRaw,
   deleteExpense,
   updateCategory,
+  expenseExists,
+  getAllExpenses,
   getExpenses,
   getRecentExpenses,
   getSummaryByCategory,
