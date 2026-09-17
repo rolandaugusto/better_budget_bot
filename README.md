@@ -44,8 +44,18 @@ Or use the explicit command:
 - `/today` — today's expenses, totaled by category
 - `/week` — this week's expenses (Mon–today), totaled by category
 - `/month` — this month's expenses, totaled by category
+- `/stats [today|week|month|all]` — category breakdown with a bar chart (default month)
+- `/trend` — compare this month-to-date against the same number of days last month
 - `/list [n]` — recent expenses (default 10)
+- `/edit <id> <category>` — fix a mistyped category on an expense
 - `/delete <id>` — remove an expense by id
+- `/backup` — download all your expenses as a JSON file
+- `/restore` — restore expenses from a `/backup` file (just send the file); safe to run repeatedly, duplicates are skipped
 - `/help` — show available commands
 
-Expenses are stored per Telegram chat in a local SQLite database (`expenses.db`).
+Expenses are stored per Telegram chat in a SQLite database. By default this is
+a local file (`expenses.db`), which is lost on redeploy in most hosting
+environments unless you set `DB_PATH` to a file on persistent storage (e.g. a
+mounted volume). Either way, run `/backup` periodically and keep the file
+somewhere safe — `/restore` can rebuild your history from it if the database
+is ever lost.
