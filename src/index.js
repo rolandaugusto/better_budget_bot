@@ -8,6 +8,7 @@ const {
   allTimeRange,
   monthToDateRange,
 } = require("./dateRanges");
+const { groupCategories, groupCategoryTrend } = require("./categoryGrouping");
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -32,7 +33,7 @@ function summaryMessage(title, chatId, start, end) {
     return `${title}\nNo expenses recorded.`;
   }
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const byCategory = db.getSummaryByCategory(chatId, start, end);
+  const byCategory = groupCategories(db.getSummaryByCategory(chatId, start, end));
   const lines = byCategory.map(
     (r) => `  ${r.category}: ${formatAmount(r.total)} (${r.count})`
   );
@@ -57,7 +58,7 @@ const STATS_PERIODS = {
 function statsMessage(chatId, periodKey) {
   const { range, label } = STATS_PERIODS[periodKey];
   const { start, end } = range();
-  const byCategory = db.getSummaryByCategory(chatId, start, end);
+  const byCategory = groupCategories(db.getSummaryByCategory(chatId, start, end));
   if (byCategory.length === 0) {
     return `${label}\nNo expenses recorded.`;
   }
@@ -68,7 +69,12 @@ function statsMessage(chatId, periodKey) {
     const bar = formatBar(maxTotal > 0 ? r.total / maxTotal : 0);
     return `${r.category.padEnd(12).slice(0, 12)} ${bar} ${formatAmount(r.total)} (${pct.toFixed(0)}%)`;
   });
-  return `${label} by category\nTotal: ${formatAmount(total)}\n\n\`\`\`\n${lines.join("\n")}\n\`\`\``;
+  const grouped = byCategory.filter((r) => r.members.length > 1);
+  const note =
+    grouped.length > 0
+      ? `\n\nGrouped similar categories: ${grouped.map((r) => r.members.join("+")).join(", ")}`
+      : "";
+  return `${label} by category\nTotal: ${formatAmount(total)}\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`${note}`;
 }
 
 function trendLine(label, previous, current) {
@@ -99,20 +105,15 @@ function trendMessage(chatId) {
 
   const currentByCategory = db.getSummaryByCategory(chatId, current.start, current.end);
   const previousByCategory = db.getSummaryByCategory(chatId, previous.start, previous.end);
-  const byCategory = new Map();
-  for (const r of previousByCategory) {
-    byCategory.set(r.category, { previous: r.total, current: 0 });
-  }
-  for (const r of currentByCategory) {
-    const entry = byCategory.get(r.category) || { previous: 0, current: 0 };
-    entry.current = r.total;
-    byCategory.set(r.category, entry);
-  }
-  const categoryLines = [...byCategory.entries()]
-    .map(([category, v]) => ({ category, ...v, diff: Math.abs(v.current - v.previous) }))
-    .sort((a, b) => b.diff - a.diff)
+  const categoryLines = groupCategoryTrend(currentByCategory, previousByCategory)
     .slice(0, 8)
-    .map((r) => trendLine(r.category, r.previous, r.current));
+    .map((r) =>
+      trendLine(
+        r.members.length > 1 ? r.members.join("+") : r.category,
+        r.previous,
+        r.current
+      )
+    );
 
   const header = `${previous.label} (days 1–${previous.day}) → ${current.label} (days 1–${current.day})`;
   return (
@@ -152,7 +153,7 @@ bot.onText(/^\/start$/, (msg) => {
       "  <amount> <category> [description]\n" +
       "e.g. 15.50 food lunch with friends\n\n" +
       "Or use /add <amount> <category> [description]\n\n" +
-      "Other commands: /today /week /month /stats /trend /list /delete <id> /help"
+      "Other commands: /today /week /month /stats /trend /list /edit <id> <category> /delete <id> /help"
   );
 });
 
@@ -167,6 +168,7 @@ bot.onText(/^\/help$/, (msg) => {
       "/stats [today|week|month|all] — category breakdown with bar chart (default month)\n" +
       "/trend — compare this month-to-date vs the same days last month\n" +
       "/list [n] — recent expenses (default 10)\n" +
+      "/edit <id> <category> — fix a mistyped category on an expense\n" +
       "/delete <id> — remove an expense by id\n\n" +
       "Tip: you can skip /add and just send: 15.50 food lunch"
   );
@@ -227,6 +229,18 @@ bot.onText(/^\/delete(?:@\S+)?\s+(\d+)$/, (msg, match) => {
   bot.sendMessage(
     msg.chat.id,
     deleted ? `Deleted expense #${id}.` : `No expense #${id} found.`
+  );
+});
+
+bot.onText(/^\/edit(?:@\S+)?\s+(\d+)\s+(\S+)$/i, (msg, match) => {
+  const id = parseInt(match[1], 10);
+  const category = match[2];
+  const updated = db.updateCategory(msg.chat.id, id, category);
+  bot.sendMessage(
+    msg.chat.id,
+    updated
+      ? `Updated #${id} category to ${category.toLowerCase()}.`
+      : `No expense #${id} found.`
   );
 });
 
